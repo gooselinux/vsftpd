@@ -1,0 +1,25 @@
+diff -up vsftpd-2.2.2/vsftpd.conf.5.isolate vsftpd-2.2.2/vsftpd.conf.5
+--- vsftpd-2.2.2/vsftpd.conf.5.isolate	2010-05-26 11:24:42.562821964 +0200
++++ vsftpd-2.2.2/vsftpd.conf.5	2010-05-26 14:30:33.776058276 +0200
+@@ -626,6 +626,21 @@ change it with the setting
+ .BR xferlog_file .
+ 
+ Default: NO
++.TP
++.B isolate_network
++If enabled, use CLONE_NEWNET to isolate the untrusted processes so that
++they can't do arbitrary connect() and instead have to ask the privileged
++process for sockets (
++.BR port_promiscuous 
++have to be disabled).
++
++Default: YES
++.TP
++.B isolate
++If enabled, use CLONE_NEWPID and CLONE_NEWIPC to isolate processes to their
++ipc and pid namespaces. So separated processes can not interact with each other.
++
++Default: YES
+ 
+ .SH NUMERIC OPTIONS
+ Below is a list of numeric options. A numeric option must be set to a non
