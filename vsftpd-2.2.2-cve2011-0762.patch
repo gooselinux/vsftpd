@@ -1,0 +1,134 @@
+diff -up vsftpd-2.2.2/access.c.cve762 vsftpd-2.2.2/access.c
+--- vsftpd-2.2.2/access.c.cve762	2008-02-02 02:30:41.000000000 +0100
++++ vsftpd-2.2.2/access.c	2011-03-03 21:18:33.644049000 +0100
+@@ -16,6 +16,7 @@ int
+ vsf_access_check_file(const struct mystr* p_filename_str)
+ {
+   static struct mystr s_access_str;
++  unsigned int iters = 0;
+ 
+   if (!tunable_deny_file)
+   {
+@@ -25,7 +26,7 @@ vsf_access_check_file(const struct mystr
+   {
+     str_alloc_text(&s_access_str, tunable_deny_file);
+   }
+-  if (vsf_filename_passes_filter(p_filename_str, &s_access_str))
++  if (vsf_filename_passes_filter(p_filename_str, &s_access_str, &iters))
+   {
+     return 0;
+   }
+@@ -45,6 +46,7 @@ int
+ vsf_access_check_file_visible(const struct mystr* p_filename_str)
+ {
+   static struct mystr s_access_str;
++  unsigned int iters = 0;
+ 
+   if (!tunable_hide_file)
+   {
+@@ -54,7 +56,7 @@ vsf_access_check_file_visible(const stru
+   {
+     str_alloc_text(&s_access_str, tunable_hide_file);
+   }
+-  if (vsf_filename_passes_filter(p_filename_str, &s_access_str))
++  if (vsf_filename_passes_filter(p_filename_str, &s_access_str, &iters))
+   {
+     return 0;
+   }
+diff -up vsftpd-2.2.2/defs.h.cve762 vsftpd-2.2.2/defs.h
+--- vsftpd-2.2.2/defs.h.cve762	2011-03-03 21:18:33.532049001 +0100
++++ vsftpd-2.2.2/defs.h	2011-03-03 21:18:33.644049000 +0100
+@@ -10,6 +10,7 @@
+ #define VSFTP_MAX_COMMAND_LINE  4096
+ #define VSFTP_DATA_BUFSIZE      65536
+ #define VSFTP_DIR_BUFSIZE       16384
++#define VSFTP_MATCHITERS_MAX    1000
+ #define VSFTP_PATH_MAX          4096
+ #define VSFTP_CONF_FILE_MAX     100000
+ #define VSFTP_LISTEN_BACKLOG    32
+diff -up vsftpd-2.2.2/ls.c.cve762 vsftpd-2.2.2/ls.c
+--- vsftpd-2.2.2/ls.c.cve762	2011-03-03 21:18:33.621049000 +0100
++++ vsftpd-2.2.2/ls.c	2011-03-03 21:33:38.669049001 +0100
+@@ -9,6 +9,7 @@
+ 
+ #include "ls.h"
+ #include "access.h"
++#include "defs.h"
+ #include "str.h"
+ #include "strlist.h"
+ #include "sysstr.h"
+@@ -118,7 +119,9 @@ vsf_ls_populate_dir_list(struct mystr_li
+     /* If we have an ls option which is a filter, apply it */
+     if (!str_isempty(p_filter_str))
+     {
+-      if (!vsf_filename_passes_filter(&s_next_filename_str, p_filter_str))
++      unsigned int iters = 0;
++      if (!vsf_filename_passes_filter(&s_next_filename_str, p_filter_str,
++                                      &iters))
+       {
+         continue;
+       }
+@@ -217,7 +220,8 @@ vsf_ls_populate_dir_list(struct mystr_li
+ 
+ int
+ vsf_filename_passes_filter(const struct mystr* p_filename_str,
+-                           const struct mystr* p_filter_str)
++                           const struct mystr* p_filter_str,
++                           unsigned int* iters)
+ {
+   /* A simple routine to match a filename against a pattern.
+    * This routine is used instead of e.g. fnmatch(3), because we should be
+@@ -266,12 +270,13 @@ vsf_filename_passes_filter(const struct 
+   } else
+     str_copy(&name_remain_str, p_filename_str);
+   
+-  while (!str_isempty(&filter_remain_str))
++  while (!str_isempty(&filter_remain_str) && *iters < VSFTP_MATCHITERS_MAX)
+   {
+     static struct mystr s_match_needed_str;
+     /* Locate next special token */
+     struct str_locate_result locate_result =
+       str_locate_chars(&filter_remain_str, "*?{");
++    (*iters)++;
+     /* Isolate text leading up to token (if any) - needs to be matched */
+     if (locate_result.found)
+     {
+@@ -349,7 +354,8 @@ vsf_filename_passes_filter(const struct 
+         {
+           str_copy(&new_filter_str, &brace_list_str);
+           str_append_str(&new_filter_str, &filter_remain_str);
+-          if (vsf_filename_passes_filter(&name_remain_str, &new_filter_str))
++          if (vsf_filename_passes_filter(&name_remain_str, &new_filter_str,
++                                         iters))
+           {
+             ret = 1;
+             goto out;
+@@ -385,6 +391,9 @@ vsf_filename_passes_filter(const struct 
+   }
+   /* OK, a match */
+   ret = 1;
++  if (*iters == VSFTP_MATCHITERS_MAX) {
++    ret = 0;
++  }
+ out:
+   str_free(&filter_remain_str);
+   str_free(&name_remain_str);
+diff -up vsftpd-2.2.2/ls.h.cve762 vsftpd-2.2.2/ls.h
+--- vsftpd-2.2.2/ls.h.cve762	2008-02-02 02:30:41.000000000 +0100
++++ vsftpd-2.2.2/ls.h	2011-03-03 21:18:33.646049000 +0100
+@@ -35,11 +35,14 @@ void vsf_ls_populate_dir_list(struct mys
+  * PARAMETERS
+  * p_filename_str  - the filename to match
+  * p_filter_str    - the filter to match against
++ * iters           - pointer to a zero-seeded int which prevents the match
++ *                   loop from running an excessive number of times
+  * RETURNS
+  * Returns 1 if there is a match, 0 otherwise.
+  */
+ int vsf_filename_passes_filter(const struct mystr* p_filename_str,
+-                               const struct mystr* p_filter_str);
++                               const struct mystr* p_filter_str,
++                               unsigned int* iters);
+ 
+ #endif /* VSF_LS_H */
+ 

@@ -1,0 +1,37 @@
+diff -up vsftpd-2.2.0/ls.c.wildchar vsftpd-2.2.0/ls.c
+--- vsftpd-2.2.0/ls.c.wildchar	2009-09-08 12:49:51.679476554 +0200
++++ vsftpd-2.2.0/ls.c	2009-09-08 12:52:53.778427990 +0200
+@@ -303,24 +303,19 @@ vsf_filename_passes_filter(const struct 
+       {
+         goto out;
+       }
+-      if (!must_match_at_current_pos)
++      if (!must_match_at_current_pos && last_token == 0)
+       {
+-        struct mystr scan_fwd = INIT_MYSTR;
++        struct mystr last_str = INIT_MYSTR;
++        str_mid_to_end(&name_remain_str, &last_str,
++          str_getlen(&name_remain_str) - str_getlen(&s_match_needed_str));
++        locate_result = str_locate_str(&last_str, &s_match_needed_str);
++        str_free(&last_str);
+ 
+-        str_mid_to_end(&name_remain_str, &scan_fwd,
+-                        indexx + str_getlen(&s_match_needed_str));
+-        /* We're allowed to be greedy, test if it match further along
+-         * keep advancing indexx while we can still match.
+-         */
+-        while( (locate_result = str_locate_str(&scan_fwd, &s_match_needed_str)),
+-            locate_result.found )
++        if (locate_result.found)
+         {
+-          indexx += locate_result.index + str_getlen(&s_match_needed_str);
+-          str_mid_to_end(&scan_fwd, &temp_str,
+-                         locate_result.index + str_getlen(&s_match_needed_str));
+-          str_copy(&scan_fwd, &temp_str);
++          ret = 1;
+         }
+-	str_free(&scan_fwd);
++        goto out;
+       }
+       /* Chop matched string out of remainder */
+       str_mid_to_end(&name_remain_str, &temp_str,
